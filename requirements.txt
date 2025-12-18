@@ -1,0 +1,7 @@
+langgraph
+langchain
+langchain-openai
+ddgs
+python-dotenv
+beautifulsoup4
+requests
