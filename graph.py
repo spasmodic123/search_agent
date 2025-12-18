@@ -174,7 +174,7 @@ def critic_node(state: AgentState):
             except:
                 pass
         
-        print(f"DEBUG: Parsed score: {score}")
+        print(f"\n\n\nDEBUG: Parsed score: {score}")  #  这个debug信息会在Ai Message之前打印出来，因为代码运行到这一行，已经有critic response了，但是没有return
         
         if advice_match:
             advice = advice_match.group(1).strip()
@@ -323,7 +323,8 @@ def increment_loop(state: AgentState):
     return {
         "loop_count": state.get("loop_count", 0) + 1,
         "writer_tool_count": 0,
-        "critic_tool_count": 0
+        "critic_tool_count": 0,
+        "critic_messages": [SystemMessage(content="现在你的工具使用次数已清零，可以继续使用工具了。")]
     }
 
 def reset_critic_tools(state: AgentState):
