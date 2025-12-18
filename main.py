@@ -50,12 +50,12 @@ def main():
 
 
     # stream_mode="updates"：
-    for event in app.stream(first_input, stream_mode="updates", config={"recursion_limit": 50}):
+    for event in app.stream(first_input, stream_mode="updates", config={"recursion_limit": 80}):
         for node_name, node_val in event.items():
-            if "writer_messages" in node_val:
+            if "writer_messages" in node_val and node_val["writer_messages"]:
                 message = node_val["writer_messages"][-1]
                 message.pretty_print()
-            elif "critic_messages" in node_val:
+            elif "critic_messages" in node_val and node_val["critic_messages"]:
                 message = node_val["critic_messages"][-1]
                 message.pretty_print()
                 
@@ -165,9 +165,6 @@ def main():
 
 
 if __name__ == "__main__":
-    from IPython.display import Image, display
-    display(Image(app.get_graph().draw_mermaid_png()))
-
     main()
 
 

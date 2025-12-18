@@ -165,7 +165,7 @@ def critic_node(state: AgentState):
     score = 0
     advice = ""
     if response.content and not response.tool_calls:
-        score_match = re.search(r'<score>(\d+)</score>', response.content)
+        score_match = re.search(r'<score>\s*(\d+)\s*</score>', response.content)
         advice_match = re.search(r'<advice>(.*?)</advice>', response.content, re.DOTALL)
         
         if score_match:
@@ -173,6 +173,8 @@ def critic_node(state: AgentState):
                 score = int(score_match.group(1))
             except:
                 pass
+        
+        print(f"DEBUG: Parsed score: {score}")
         
         if advice_match:
             advice = advice_match.group(1).strip()
@@ -201,6 +203,11 @@ def writer_router(state: AgentState):
     # 只有当有工具调用请求时，才去 tools_writer
     if last_message.tool_calls:
         return "tools_writer" 
+
+    # DeepSeek 有时会输出原始 tokens 而没有被解析为 tool_calls
+    content = str(last_message.content)
+    if "<｜DSML｜function_calls>" in content:
+        return "tools_writer"
         
     # 否则（生成了文本），转交给 Critic
     return "critic"
@@ -223,7 +230,7 @@ def critic_router(state: AgentState):
     score = state.get("score", 0)
     loop = state.get("loop_count", 0)
     
-    # 如果分数 >= 8 或者 已经尝试了 3 次（0, 1, 2），则结束
+    # 如果分数 >= 8 或者 已经尝试了 2 次（0, 1），则结束
     if score >= 8 or loop >= 2: 
         return END
     else:
@@ -237,16 +244,15 @@ def writer_tools_node(state: AgentState):
     if state.get("writer_tool_count", 0) >= 6:
         error_msgs = []
         if last_msg.tool_calls:
+            print("DEBUG: writer_tool_count limit reached with valid tool_calls. Returning Error ToolMessage.")
             for tool_call in last_msg.tool_calls:
                 error_msgs.append(ToolMessage(
                     tool_call_id=tool_call['id'],
                     content="错误：本轮工具调用次数已达上限。请停止搜索并撰写报告。"
                 ))
         else:
-            # 如果没有 tool_calls 但进来了（可能是 Raw XML case），也返回错误
-             # 我们需要一个虚构的 ID 或者直接追加 HumanMessage?
-             # ToolMessage 需要 tool_call_id。
-             # 这种情况最好返回 SystemMessage 告诉他格式错了，或者如果是 Limit 到了，就 SystemMessage。
+             # 如果没有 tool_calls 但进来了（可能是 Raw XML case），也返回错误
+             print("DEBUG: writer_tool_count limit reached AND Raw XML format detected. Returning Error SystemMessage.")
              return {
                  "writer_messages": [SystemMessage(content="系统通知：工具调用次数上限已达。此前调用格式可能有误。请停止尝试，直接撰写报告。")]
              }
@@ -258,9 +264,9 @@ def writer_tools_node(state: AgentState):
     #这是处理 Raw XML 错误的核心逻辑
     if not last_msg.tool_calls:
         # 如果路由到了这里但没有 tool_calls，说明 Router 认为是 Raw XML 错误
-        # 我们返回一个 SystemMessage 或者 ToolMessage (如果有 ID 最好，没有只能 System/Human)
+        print("DEBUG: writer_tools_node detected Raw XML format. Sending System Warning.")
         return {
-            "writer_messages": [HumanMessage(content="系统提示：检测到你尝试调用工具，但格式不正确（可能是输出了原始 XML）。请务必使用正确的 Function Calling 格式重新调用。")]
+            "writer_messages": [SystemMessage(content="系统严重警告：检测到你输出了无效的工具调用格式（Raw XML）。这会导致工具无法执行。请**立刻**停止生成报告，并使用正确的 Tool/Function Calling 格式重新发起调用！")]
         }
     
     tool_node = ToolNode(tools)
@@ -277,22 +283,33 @@ def critic_tools_node(state: AgentState):
     
     if state.get("critic_tool_count", 0) >= 6:
         error_msgs = []
-        for tool_call in last_msg.tool_calls:
-            error_msgs.append(ToolMessage(
-                tool_call_id=tool_call['id'],
-                content="错误：本轮审查工具调用次数已达上限。请停止搜索并进行评分。"
-            ))
+        if last_msg.tool_calls:
+            print("DEBUG: critic_tool_count limit reached with valid tool_calls. Returning Error ToolMessage.")
+            for tool_call in last_msg.tool_calls:
+                error_msgs.append(ToolMessage(
+                    tool_call_id=tool_call['id'],
+                    content="错误：本轮工具调用次数已达上限。请停止搜索并给出修改建议。"
+                ))
+        else:
+             # 如果没有 tool_calls 但进来了（可能是 Raw XML case），也返回错误
+             print("DEBUG: critic_tool_count limit reached AND Raw XML format detected. Returning Error SystemMessage.")
+             return {
+                 "critic_messages": [SystemMessage(content="系统通知：工具调用次数上限已达。此前调用格式可能有误。请停止尝试，直接给出修改建议。")]
+             }
+             
         return {
             "critic_messages": error_msgs
         }
+    
+    #这是处理 Raw XML 错误的核心逻辑
+    if not last_msg.tool_calls:
+        # 如果路由到了这里但没有 tool_calls，说明 Router 认为是 Raw XML 错误
+        print("DEBUG: critic_tools_node detected Raw XML format. Sending System Warning.")
+        return {
+            "critic_messages": [SystemMessage(content="系统严重警告：检测到你输出了无效的工具调用格式（Raw XML）。这会导致工具无法执行。请使用正确的 Tool/Function Calling 格式重新发起调用！")]
+        }
 
     tool_node = ToolNode(tools)
-    
-    # 如果没有 tool_calls 但进来了（Raw XML case），手动处理
-    if not last_msg.tool_calls:
-        return {
-            "critic_messages": [HumanMessage(content="系统提示：检测到你尝试调用工具，但格式不正确（输出了原始 XML）。请务必使用正确的 Function Calling 格式重新调用。")]
-        }
 
     result = tool_node.invoke({"messages": [last_msg]})
     
