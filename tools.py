@@ -3,6 +3,7 @@ from ddgs import DDGS
 import trafilatura
 import time
 import random
+import requests
 
 @tool
 def search_web(query: str) -> str:
@@ -39,6 +40,9 @@ def visit_page(url: str) -> str:
             # Use requests to download the page
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status() # Check for HTTP errors (404, 403, etc.)
+
+            # 手动指定 UTF-8 编码
+            response.encoding = 'utf-8'
             
             # Use Trafilatura to extract text from the HTML string
             text = trafilatura.extract(response.text, include_comments=False, include_tables=True)

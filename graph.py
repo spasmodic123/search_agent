@@ -1,8 +1,9 @@
 import re
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 import openai
 from dotenv import load_dotenv
 import os
@@ -145,6 +146,11 @@ def critic_node(state: AgentState):
     
     # 2. 历史消息
     messages_to_send += list(current_messages)
+
+    # 如果是新 loop 开始（tool_count 刚被重置）
+    if state.get("critic_tool_count", 0) == 0 and state.get("loop_count", 0) > 0:
+        # 注入"重置提示"
+        messages_to_send.append(SystemMessage(content="注意：工具使用次数已重置为0，你可以继续验证事实。"))
     
     # 3. 注入草稿
     # 仅在 Critic 开始新一轮审查（tool_count == 0）时注入草稿
@@ -323,8 +329,7 @@ def increment_loop(state: AgentState):
     return {
         "loop_count": state.get("loop_count", 0) + 1,
         "writer_tool_count": 0,
-        "critic_tool_count": 0,
-        "critic_messages": [SystemMessage(content="现在你的工具使用次数已清零，可以继续使用工具了。")]
+        "critic_tool_count": 0
     }
 
 def reset_critic_tools(state: AgentState):
@@ -368,4 +373,6 @@ workflow.add_conditional_edges(
 workflow.add_edge("tools_critic", "critic")
 workflow.add_edge("increment_loop", "writer")
 
-app = workflow.compile()
+# 创建内存检查点，支持多会话
+memory = MemorySaver()
+app = workflow.compile(checkpointer=memory)

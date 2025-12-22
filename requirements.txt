@@ -5,3 +5,7 @@ ddgs
 python-dotenv
 beautifulsoup4
 requests
+trafilatura
+fastapi
+uvicorn[standard]
+sse-starlette
